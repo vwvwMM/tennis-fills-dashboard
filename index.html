@@ -452,6 +452,11 @@
           <div class="sub" id="metricMaxedSub">threshold</div>
         </div>
         <div class="metric">
+          <div class="label">Rest index</div>
+          <div class="value" id="metricRestIndex">-</div>
+          <div class="sub" id="metricRestIndexSub">non-max progress</div>
+        </div>
+        <div class="metric">
           <div class="label">Positive drift</div>
           <div class="value" id="metricDrift">-</div>
           <div class="sub" id="metricDriftSub">fill pressure</div>
@@ -519,6 +524,8 @@
       avgShares: document.getElementById("metricAvgShares"),
       maxed: document.getElementById("metricMaxed"),
       maxedSub: document.getElementById("metricMaxedSub"),
+      restIndex: document.getElementById("metricRestIndex"),
+      restIndexSub: document.getElementById("metricRestIndexSub"),
       drift: document.getElementById("metricDrift"),
       driftSub: document.getElementById("metricDriftSub"),
     };
@@ -730,8 +737,12 @@
       }
       rows.sort((a, b) => (b.last_fill_timestamp || 0) - (a.last_fill_timestamp || 0) || b.total_filled_shares - a.total_filled_shares);
       const reached = rows.filter((row) => row.reached_max_filled_shares).length;
+      const restProgressPercents = rows
+        .filter((row) => !row.reached_max_filled_shares)
+        .map((row) => maxShares > 0 ? Math.min(100, row.progress_shares * 100 / maxShares) : 0);
       const positiveDrift = rows.filter((row) => row.fill_price_drift > 0).length;
       const totalPressure = sum(rows.map((row) => row.fill_pressure_score));
+      const restBuckets = progressBuckets(restProgressPercents);
       return {
         user: wallet,
         max_filled_shares: maxShares,
@@ -747,6 +758,11 @@
           average_total_filled_shares_across_positions: rows.length ? sum(rows.map((row) => row.total_filled_shares)) / rows.length : 0,
           positions_reached_max_filled_size: reached,
           percent_positions_reached_max_filled_size: rows.length ? reached * 100 / rows.length : 0,
+          non_max_position_count: restProgressPercents.length,
+          non_max_average_progress_percent: restProgressPercents.length ? sum(restProgressPercents) / restProgressPercents.length : 0,
+          non_max_median_progress_percent: percentile(restProgressPercents, 0.5),
+          non_max_p90_progress_percent: percentile(restProgressPercents, 0.9),
+          non_max_progress_buckets: restBuckets,
           positions_with_positive_fill_price_drift: positiveDrift,
           percent_positions_with_positive_fill_price_drift: rows.length ? positiveDrift * 100 / rows.length : 0,
           average_fill_price_drift: rows.length ? sum(rows.map((row) => row.fill_price_drift)) / rows.length : 0,
@@ -764,6 +780,8 @@
       els.avgShares.textContent = fmtNum(summary.average_total_filled_shares_across_positions);
       els.maxed.textContent = fmtNum(summary.percent_positions_reached_max_filled_size) + "%";
       els.maxedSub.textContent = fmtInt(summary.positions_reached_max_filled_size) + " at or above " + fmtNum(payload.max_filled_shares) + "sh";
+      els.restIndex.textContent = fmtNum(summary.non_max_average_progress_percent) + "%";
+      els.restIndexSub.textContent = fmtInt(summary.non_max_position_count) + " rest, med " + fmtNum(summary.non_max_median_progress_percent) + "%, p90 " + fmtNum(summary.non_max_p90_progress_percent) + "%";
       els.drift.textContent = fmtNum(summary.percent_positions_with_positive_fill_price_drift) + "%";
       els.driftSub.textContent = fmtInt(summary.positions_with_positive_fill_price_drift) + " positive, pressure " + fmtNum(summary.total_fill_pressure_score);
     }
@@ -990,6 +1008,25 @@
         total += timestamps[i] - timestamps[i - 1];
       }
       return total / (timestamps.length - 1);
+    }
+
+    function percentile(values, q) {
+      if (!values.length) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * q) - 1));
+      return sorted[index];
+    }
+
+    function progressBuckets(values) {
+      const buckets = { "0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0 };
+      for (const value of values) {
+        if (value < 20) buckets["0-20"] += 1;
+        else if (value < 40) buckets["20-40"] += 1;
+        else if (value < 60) buckets["40-60"] += 1;
+        else if (value < 80) buckets["60-80"] += 1;
+        else buckets["80-100"] += 1;
+      }
+      return buckets;
     }
 
     function fmtNum(value) {
