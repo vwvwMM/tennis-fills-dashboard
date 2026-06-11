@@ -211,7 +211,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1120px;
+      min-width: 1220px;
     }
 
     thead th {
@@ -458,6 +458,7 @@
                 <th class="left" aria-sort="none"><button class="sort-btn left" type="button" data-sort="position">Position</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="fill_count">Fills</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="total_filled_shares">Filled shares</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="net_filled_shares">Net filled sh</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="current_position_shares">Current shares</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="first_fill_price">First price</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="max_fill_price">Max price</button></th>
@@ -469,7 +470,7 @@
               </tr>
             </thead>
             <tbody id="rowsBody">
-              <tr><td class="empty" colspan="11">No data loaded</td></tr>
+              <tr><td class="empty" colspan="12">No data loaded</td></tr>
             </tbody>
           </table>
         </div>
@@ -650,6 +651,16 @@
       }
 
       const rows = [];
+      const assetFillShares = new Map();
+      const marketFillShares = new Map();
+      for (const [asset, fills] of fillsByAsset.entries()) {
+        const first = fills[0] || {};
+        const key = marketKey(first);
+        const shares = sum(fills.map((row) => dec(row.size)));
+        assetFillShares.set(asset, shares);
+        if (!marketFillShares.has(key)) marketFillShares.set(key, new Map());
+        marketFillShares.get(key).set(asset, shares);
+      }
       for (const [asset, fills] of fillsByAsset.entries()) {
         fills.sort((a, b) => {
           const timeDiff = dec(a.timestamp) - dec(b.timestamp);
@@ -660,6 +671,7 @@
         const position = positionsByAsset.get(asset) || {};
         const timestamps = fills.map((row) => Number(row.timestamp || 0)).filter((value) => value > 0);
         const totalShares = sum(fills.map((row) => dec(row.size)));
+        const netFilledShares = totalShares - oppositeFilledShares(asset, first, assetFillShares, marketFillShares);
         const totalCost = sum(fills.map(fillCost));
         const prices = fills.map(fillPrice);
         const averagePrice = totalShares > 0 ? totalCost / totalShares : 0;
@@ -671,6 +683,7 @@
           outcome: String(first.outcome || position.outcome || ""),
           fill_count: fills.length,
           total_filled_shares: totalShares,
+          net_filled_shares: netFilledShares,
           total_cost: totalCost,
           average_fill_price: averagePrice,
           first_fill_price: prices[0] || 0,
@@ -724,7 +737,7 @@
       rows.sort(compareRows);
       updateSortHeaders();
       if (!rows.length) {
-        els.body.innerHTML = '<tr><td class="empty" colspan="11">No matching positions</td></tr>';
+        els.body.innerHTML = '<tr><td class="empty" colspan="12">No matching positions</td></tr>';
         return;
       }
       els.body.innerHTML = rows.map((row) => {
@@ -736,6 +749,7 @@
           '<td class="left"><div class="slug">' + escapeHtml(row.slug || row.asset) + '</div><div class="outcome">' + escapeHtml(row.outcome || row.title || "") + '</div></td>' +
           '<td>' + fmtInt(row.fill_count) + '</td>' +
           '<td class="' + (row.reached_max_filled_shares ? "maxed" : "") + '">' + fmtNum(row.total_filled_shares) + '</td>' +
+          '<td class="' + signedClass(row.net_filled_shares) + '">' + fmtSigned(row.net_filled_shares) + '</td>' +
           '<td>' + fmtNum(row.current_position_shares) + '</td>' +
           '<td>' + fmtPrice(row.first_fill_price) + '</td>' +
           '<td class="' + (row.max_fill_price >= 0.5 ? "warn" : "") + '">' + fmtPrice(row.max_fill_price) + '</td>' +
@@ -784,6 +798,26 @@
       }
       const value = row[key];
       return value == null ? 0 : value;
+    }
+
+    function marketKey(row) {
+      return String(row.conditionId || row.condition_id || row.slug || row.eventSlug || "");
+    }
+
+    function oppositeFilledShares(asset, row, assetFillShares, marketFillShares) {
+      const sharesByAsset = marketFillShares.get(marketKey(row));
+      if (!sharesByAsset) return 0;
+      let opposite = 0;
+      for (const [otherAsset, shares] of sharesByAsset.entries()) {
+        if (otherAsset !== asset) opposite += shares;
+      }
+      return opposite;
+    }
+
+    function signedClass(value) {
+      if (value > 0) return "maxed";
+      if (value < 0) return "warn";
+      return "";
     }
 
     function defaultDirection(key) {
@@ -896,6 +930,14 @@
 
     function fmtNum(value) {
       return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    }
+
+    function fmtSigned(value) {
+      const number = Number(value || 0);
+      const formatted = fmtNum(Math.abs(number));
+      if (number > 0) return "+" + formatted;
+      if (number < 0) return "-" + formatted;
+      return formatted;
     }
 
     function fmtInt(value) {
