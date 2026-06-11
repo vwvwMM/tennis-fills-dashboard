@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tennis Fills Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #18202a;
+      --muted: #5d6875;
+      --line: #d8dde5;
+      --accent: #116b5b;
+      --accent-2: #3454d1;
+      --warn: #a15c00;
+      --bad: #b42318;
+      --good: #087443;
+      --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      padding: 18px 24px 16px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 680;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 12px;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .controls {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+      padding: 14px 24px;
+    }
+
+    .control-grid {
+      max-width: 1480px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(280px, 2fr) minmax(140px, 0.7fr) minmax(140px, 0.7fr) minmax(220px, 1fr);
+      gap: 12px;
+      align-items: end;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 620;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 10px;
+    }
+
+    main {
+      max-width: 1480px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 18px 24px 28px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px 14px;
+      box-shadow: var(--shadow);
+      min-height: 84px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 620;
+      margin-bottom: 7px;
+    }
+
+    .metric .value {
+      font-size: 24px;
+      font-weight: 720;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .metric .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 3px;
+    }
+
+    .status {
+      min-height: 22px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .status strong {
+      color: var(--text);
+    }
+
+    .table-shell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .table-scroll {
+      overflow: auto;
+      max-height: calc(100vh - 285px);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1120px;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #eef2f5;
+      color: #344054;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: right;
+      padding: 10px 9px;
+      white-space: nowrap;
+    }
+
+    tbody td {
+      border-bottom: 1px solid #edf0f4;
+      padding: 9px;
+      text-align: right;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    tbody tr:hover {
+      background: #f8fafc;
+    }
+
+    th.left,
+    td.left {
+      text-align: left;
+    }
+
+    .slug {
+      font-weight: 650;
+      color: var(--text);
+    }
+
+    .outcome {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .bar {
+      height: 8px;
+      width: 100px;
+      background: #e8edf2;
+      border-radius: 999px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      background: var(--accent-2);
+    }
+
+    .maxed {
+      color: var(--good);
+      font-weight: 720;
+    }
+
+    .warn {
+      color: var(--warn);
+    }
+
+    .error {
+      color: var(--bad);
+      font-weight: 650;
+    }
+
+    .empty {
+      padding: 30px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      header,
+      .controls,
+      main {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      .control-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .table-scroll {
+        max-height: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .control-grid,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .metric .value {
+        font-size: 21px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="topbar">
+        <div>
+          <h1>Tennis Fills Dashboard</h1>
+          <div class="subtitle">Read-only public activity and position view</div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="copyLinkBtn" type="button">Copy link</button>
+          <button class="btn" id="jsonBtn" type="button">Download JSON</button>
+          <button class="btn primary" id="refreshBtn" type="button">Refresh</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="controls">
+      <div class="control-grid">
+        <label>
+          Wallet
+          <input id="walletInput" spellcheck="false" autocomplete="off">
+        </label>
+        <label>
+          Max size
+          <input id="maxInput" inputmode="decimal" value="500">
+        </label>
+        <label>
+          Pages
+          <input id="pagesInput" inputmode="numeric" value="20">
+        </label>
+        <label>
+          Search
+          <input id="searchInput" placeholder="slug, title, outcome, token">
+        </label>
+      </div>
+    </section>
+
+    <main>
+      <section class="metrics" aria-live="polite">
+        <div class="metric">
+          <div class="label">Positions</div>
+          <div class="value" id="metricPositions">-</div>
+          <div class="sub">with BUY fills</div>
+        </div>
+        <div class="metric">
+          <div class="label">BUY fills</div>
+          <div class="value" id="metricFills">-</div>
+          <div class="sub">activity rows</div>
+        </div>
+        <div class="metric">
+          <div class="label">Total shares</div>
+          <div class="value" id="metricShares">-</div>
+          <div class="sub">matched BUY size</div>
+        </div>
+        <div class="metric">
+          <div class="label">Avg shares</div>
+          <div class="value" id="metricAvgShares">-</div>
+          <div class="sub">per filled position</div>
+        </div>
+        <div class="metric">
+          <div class="label">Reached max</div>
+          <div class="value" id="metricMaxed">-</div>
+          <div class="sub" id="metricMaxedSub">threshold</div>
+        </div>
+      </section>
+
+      <div class="status">
+        <span id="statusText">Idle</span>
+        <span id="freshnessText"></span>
+      </div>
+
+      <section class="table-shell">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th class="left">Position</th>
+                <th>Fills</th>
+                <th>Filled shares</th>
+                <th>Current shares</th>
+                <th>First price</th>
+                <th>Max price</th>
+                <th>Avg price</th>
+                <th>Avg gap</th>
+                <th>Current value</th>
+                <th>Progress</th>
+                <th>Last fill</th>
+              </tr>
+            </thead>
+            <tbody id="rowsBody">
+              <tr><td class="empty" colspan="11">No data loaded</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const DEFAULT_WALLET = "0xD03450276D4Aa4069ce11bAC4CFb1683a724EecE";
+    const ACTIVITY_URL = "https://data-api.polymarket.com/activity";
+    const POSITIONS_URL = "https://data-api.polymarket.com/positions";
+    const state = { payload: null, rows: [] };
+
+    const els = {
+      wallet: document.getElementById("walletInput"),
+      max: document.getElementById("maxInput"),
+      pages: document.getElementById("pagesInput"),
+      search: document.getElementById("searchInput"),
+      refresh: document.getElementById("refreshBtn"),
+      copy: document.getElementById("copyLinkBtn"),
+      json: document.getElementById("jsonBtn"),
+      status: document.getElementById("statusText"),
+      freshness: document.getElementById("freshnessText"),
+      body: document.getElementById("rowsBody"),
+      positions: document.getElementById("metricPositions"),
+      fills: document.getElementById("metricFills"),
+      shares: document.getElementById("metricShares"),
+      avgShares: document.getElementById("metricAvgShares"),
+      maxed: document.getElementById("metricMaxed"),
+      maxedSub: document.getElementById("metricMaxedSub"),
+    };
+
+    init();
+
+    function init() {
+      const params = new URLSearchParams(window.location.search);
+      els.wallet.value = params.get("wallet") || DEFAULT_WALLET;
+      els.max.value = params.get("max") || "500";
+      els.pages.value = params.get("pages") || "20";
+      els.refresh.addEventListener("click", refresh);
+      els.copy.addEventListener("click", copyLink);
+      els.json.addEventListener("click", downloadJson);
+      els.search.addEventListener("input", renderRows);
+      refresh();
+    }
+
+    async function refresh() {
+      const wallet = els.wallet.value.trim();
+      const maxShares = Math.max(0, Number(els.max.value || "500"));
+      const pages = Math.max(1, Math.min(100, Number.parseInt(els.pages.value || "20", 10)));
+      setBusy(true, "Loading public activity and positions...");
+      updateUrl(wallet, maxShares, pages);
+      try {
+        const [activity, positions] = await Promise.all([
+          fetchActivity(wallet, pages),
+          fetchPositions(wallet),
+        ]);
+        state.payload = buildDashboard(wallet, activity, positions, maxShares);
+        state.rows = state.payload.positions;
+        renderMetrics(state.payload);
+        renderRows();
+        els.freshness.textContent = "Last refreshed " + new Date().toLocaleString();
+        setBusy(false, "Loaded " + activity.length.toLocaleString() + " activity rows and " + positions.length.toLocaleString() + " position rows");
+      } catch (error) {
+        setBusy(false, "");
+        els.status.innerHTML = '<span class="error">' + escapeHtml(error.message || String(error)) + '</span>';
+      }
+    }
+
+    async function fetchActivity(wallet, pages) {
+      const limit = 500;
+      const rows = [];
+      for (let page = 0; page < pages; page += 1) {
+        const url = new URL(ACTIVITY_URL);
+        url.searchParams.set("user", wallet);
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("offset", String(page * limit));
+        const batch = await fetchJson(url);
+        if (!Array.isArray(batch)) {
+          throw new Error("Unexpected activity response");
+        }
+        rows.push(...batch);
+        if (batch.length < limit) break;
+      }
+      return rows;
+    }
+
+    async function fetchPositions(wallet) {
+      const limit = 500;
+      const rows = [];
+      for (let offset = 0; ; offset += limit) {
+        const url = new URL(POSITIONS_URL);
+        url.searchParams.set("user", wallet);
+        url.searchParams.set("sizeThreshold", "0");
+        url.searchParams.set("redeemable", "false");
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("offset", String(offset));
+        url.searchParams.set("sortBy", "TOKENS");
+        url.searchParams.set("sortDirection", "DESC");
+        const batch = await fetchJson(url);
+        if (!Array.isArray(batch)) {
+          throw new Error("Unexpected positions response");
+        }
+        rows.push(...batch);
+        if (batch.length < limit) break;
+      }
+      return rows;
+    }
+
+    async function fetchJson(url) {
+      if (typeof fetch !== "function") {
+        return xhrJson(url.toString());
+      }
+      const response = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status + " from " + url.hostname);
+      }
+      return response.json();
+    }
+
+    function xhrJson(url) {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("GET", url, true);
+        request.setRequestHeader("Accept", "application/json");
+        request.onload = () => {
+          if (request.status < 200 || request.status >= 300) {
+            reject(new Error("HTTP " + request.status + " from " + new URL(url).hostname));
+            return;
+          }
+          try {
+            resolve(JSON.parse(request.responseText));
+          } catch (error) {
+            reject(new Error("Invalid JSON response"));
+          }
+        };
+        request.onerror = () => reject(new Error("Network request failed"));
+        request.send();
+      });
+    }
+
+    function buildDashboard(wallet, activityRows, positionRows, maxShares) {
+      const positionsByAsset = new Map();
+      for (const row of positionRows) {
+        const asset = String(row.asset || row.assetId || row.tokenId || "");
+        if (asset) positionsByAsset.set(asset, row);
+      }
+
+      const fillsByAsset = new Map();
+      for (const row of activityRows) {
+        if (String(row.type || "").toUpperCase() !== "TRADE") continue;
+        if (String(row.side || "").toUpperCase() !== "BUY") continue;
+        const asset = String(row.asset || row.assetId || row.tokenId || "");
+        const size = dec(row.size);
+        if (!asset || size <= 0) continue;
+        if (!fillsByAsset.has(asset)) fillsByAsset.set(asset, []);
+        fillsByAsset.get(asset).push(row);
+      }
+
+      const rows = [];
+      for (const [asset, fills] of fillsByAsset.entries()) {
+        fills.sort((a, b) => {
+          const timeDiff = dec(a.timestamp) - dec(b.timestamp);
+          if (timeDiff !== 0) return timeDiff;
+          return String(a.transactionHash || "").localeCompare(String(b.transactionHash || ""));
+        });
+        const first = fills[0];
+        const position = positionsByAsset.get(asset) || {};
+        const timestamps = fills.map((row) => Number(row.timestamp || 0)).filter((value) => value > 0);
+        const totalShares = sum(fills.map((row) => dec(row.size)));
+        const totalCost = sum(fills.map(fillCost));
+        const prices = fills.map(fillPrice);
+        const averagePrice = totalShares > 0 ? totalCost / totalShares : 0;
+        const lastTs = timestamps.length ? timestamps[timestamps.length - 1] : null;
+        rows.push({
+          asset,
+          slug: String(first.slug || first.eventSlug || position.slug || ""),
+          title: String(first.title || position.title || ""),
+          outcome: String(first.outcome || position.outcome || ""),
+          fill_count: fills.length,
+          total_filled_shares: totalShares,
+          total_cost: totalCost,
+          average_fill_price: averagePrice,
+          first_fill_price: prices[0] || 0,
+          max_fill_price: prices.length ? Math.max(...prices) : 0,
+          first_fill_timestamp: timestamps.length ? timestamps[0] : null,
+          last_fill_timestamp: lastTs,
+          average_seconds_between_fills: averageGap(timestamps),
+          current_position_shares: dec(position.size),
+          current_average_price: dec(position.avgPrice),
+          current_value: dec(position.currentValue),
+          reached_max_filled_shares: totalShares >= maxShares,
+        });
+      }
+      rows.sort((a, b) => (b.last_fill_timestamp || 0) - (a.last_fill_timestamp || 0) || b.total_filled_shares - a.total_filled_shares);
+      const reached = rows.filter((row) => row.reached_max_filled_shares).length;
+      return {
+        user: wallet,
+        max_filled_shares: maxShares,
+        summary: {
+          positions_with_buy_fills: rows.length,
+          buy_fill_count: sum(rows.map((row) => row.fill_count)),
+          total_buy_shares: sum(rows.map((row) => row.total_filled_shares)),
+          average_total_filled_shares_across_positions: rows.length ? sum(rows.map((row) => row.total_filled_shares)) / rows.length : 0,
+          positions_reached_max_filled_size: reached,
+          percent_positions_reached_max_filled_size: rows.length ? reached * 100 / rows.length : 0,
+        },
+        positions: rows,
+      };
+    }
+
+    function renderMetrics(payload) {
+      const summary = payload.summary;
+      els.positions.textContent = fmtInt(summary.positions_with_buy_fills);
+      els.fills.textContent = fmtInt(summary.buy_fill_count);
+      els.shares.textContent = fmtNum(summary.total_buy_shares);
+      els.avgShares.textContent = fmtNum(summary.average_total_filled_shares_across_positions);
+      els.maxed.textContent = fmtNum(summary.percent_positions_reached_max_filled_size) + "%";
+      els.maxedSub.textContent = fmtInt(summary.positions_reached_max_filled_size) + " at or above " + fmtNum(payload.max_filled_shares) + "sh";
+    }
+
+    function renderRows() {
+      const query = els.search.value.trim().toLowerCase();
+      const rows = state.rows.filter((row) => {
+        if (!query) return true;
+        return [row.asset, row.slug, row.title, row.outcome].some((value) => String(value || "").toLowerCase().includes(query));
+      });
+      if (!rows.length) {
+        els.body.innerHTML = '<tr><td class="empty" colspan="11">No matching positions</td></tr>';
+        return;
+      }
+      els.body.innerHTML = rows.map((row) => {
+        const maxShares = Number(state.payload.max_filled_shares || 500);
+        const pct = maxShares > 0 ? Math.min(100, row.total_filled_shares * 100 / maxShares) : 0;
+        const gap = row.average_seconds_between_fills == null ? "-" : fmtDuration(row.average_seconds_between_fills);
+        const last = row.last_fill_timestamp ? formatTime(row.last_fill_timestamp) : "-";
+        return '<tr>' +
+          '<td class="left"><div class="slug">' + escapeHtml(row.slug || row.asset) + '</div><div class="outcome">' + escapeHtml(row.outcome || row.title || "") + '</div></td>' +
+          '<td>' + fmtInt(row.fill_count) + '</td>' +
+          '<td class="' + (row.reached_max_filled_shares ? "maxed" : "") + '">' + fmtNum(row.total_filled_shares) + '</td>' +
+          '<td>' + fmtNum(row.current_position_shares) + '</td>' +
+          '<td>' + fmtPrice(row.first_fill_price) + '</td>' +
+          '<td class="' + (row.max_fill_price >= 0.5 ? "warn" : "") + '">' + fmtPrice(row.max_fill_price) + '</td>' +
+          '<td>' + fmtPrice(row.average_fill_price) + '</td>' +
+          '<td>' + gap + '</td>' +
+          '<td>' + fmtNum(row.current_value) + '</td>' +
+          '<td><span class="bar"><span style="width:' + pct.toFixed(1) + '%"></span></span> ' + fmtNum(pct) + '%</td>' +
+          '<td>' + last + '</td>' +
+        '</tr>';
+      }).join("");
+    }
+
+    function copyLink() {
+      const wallet = els.wallet.value.trim();
+      const maxShares = els.max.value || "500";
+      const pages = els.pages.value || "20";
+      updateUrl(wallet, maxShares, pages);
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        els.status.textContent = "Link copied";
+      }).catch(() => {
+        els.status.textContent = "Copy failed";
+      });
+    }
+
+    function downloadJson() {
+      if (!state.payload) return;
+      const blob = new Blob([JSON.stringify(state.payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tennis-fills-dashboard.json";
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function updateUrl(wallet, maxShares, pages) {
+      const params = new URLSearchParams();
+      params.set("wallet", wallet);
+      params.set("max", String(maxShares));
+      params.set("pages", String(pages));
+      window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+    }
+
+    function setBusy(isBusy, text) {
+      els.refresh.disabled = isBusy;
+      els.status.textContent = text;
+    }
+
+    function dec(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function sum(values) {
+      return values.reduce((acc, value) => acc + value, 0);
+    }
+
+    function fillPrice(row) {
+      const price = dec(row.price);
+      if (price > 0) return price;
+      const size = dec(row.size);
+      const cost = dec(row.usdcSize);
+      return size > 0 ? cost / size : 0;
+    }
+
+    function fillCost(row) {
+      const cost = dec(row.usdcSize);
+      return cost > 0 ? cost : dec(row.size) * fillPrice(row);
+    }
+
+    function averageGap(timestamps) {
+      if (timestamps.length < 2) return null;
+      let total = 0;
+      for (let i = 1; i < timestamps.length; i += 1) {
+        total += timestamps[i] - timestamps[i - 1];
+      }
+      return total / (timestamps.length - 1);
+    }
+
+    function fmtNum(value) {
+      return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    }
+
+    function fmtInt(value) {
+      return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    function fmtPrice(value) {
+      return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    }
+
+    function fmtDuration(seconds) {
+      if (seconds < 60) return fmtNum(seconds) + "s";
+      if (seconds < 3600) return fmtNum(seconds / 60) + "m";
+      return fmtNum(seconds / 3600) + "h";
+    }
+
+    function formatTime(timestamp) {
+      return new Date(timestamp * 1000).toLocaleString();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
