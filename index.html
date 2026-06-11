@@ -97,6 +97,13 @@
       color: #ffffff;
     }
 
+    .btn.active {
+      background: #e8f4f1;
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
     .btn:disabled {
       opacity: 0.55;
       cursor: not-allowed;
@@ -380,6 +387,7 @@
           <div class="subtitle">Read-only public activity and position view</div>
         </div>
         <div class="actions">
+          <button class="btn" id="resolvedBtn" type="button" aria-pressed="false">Resolved</button>
           <button class="btn" id="copyLinkBtn" type="button">Copy link</button>
           <button class="btn" id="jsonBtn" type="button">Download JSON</button>
           <button class="btn primary" id="refreshBtn" type="button">Refresh</button>
@@ -482,7 +490,7 @@
     const DEFAULT_WALLET = "0xD03450276D4Aa4069ce11bAC4CFb1683a724EecE";
     const ACTIVITY_URL = "https://data-api.polymarket.com/activity";
     const POSITIONS_URL = "https://data-api.polymarket.com/positions";
-    const state = { payload: null, rows: [], sortKey: "last_fill_timestamp", sortDirection: "desc" };
+    const state = { payload: null, rows: [], sortKey: "last_fill_timestamp", sortDirection: "desc", resolvedOnly: false };
 
     const els = {
       wallet: document.getElementById("walletInput"),
@@ -492,6 +500,7 @@
       end: document.getElementById("endInput"),
       search: document.getElementById("searchInput"),
       refresh: document.getElementById("refreshBtn"),
+      resolved: document.getElementById("resolvedBtn"),
       copy: document.getElementById("copyLinkBtn"),
       json: document.getElementById("jsonBtn"),
       status: document.getElementById("statusText"),
@@ -514,7 +523,10 @@
       els.pages.value = params.get("pages") || "7";
       els.start.value = params.get("start") || "";
       els.end.value = params.get("end") || "";
+      state.resolvedOnly = params.get("resolved") === "1";
+      updateResolvedButton();
       els.refresh.addEventListener("click", refresh);
+      els.resolved.addEventListener("click", toggleResolved);
       els.copy.addEventListener("click", copyLink);
       els.json.addEventListener("click", downloadJson);
       els.search.addEventListener("input", renderRows);
@@ -538,12 +550,12 @@
           fetchActivity(wallet, pages),
           fetchPositions(wallet),
         ]);
-        state.payload = buildDashboard(wallet, activity, positions, maxShares, range);
+        state.payload = buildDashboard(wallet, activity, positions, maxShares, range, state.resolvedOnly);
         state.rows = state.payload.positions;
         renderMetrics(state.payload);
         renderRows();
         els.freshness.textContent = "Last refreshed " + new Date().toLocaleString();
-        setBusy(false, "Loaded " + activity.length.toLocaleString() + " activity rows and " + positions.length.toLocaleString() + " position rows");
+        setBusy(false, "Loaded " + activity.length.toLocaleString() + " activity rows and " + positions.length.toLocaleString() + " position rows" + (state.resolvedOnly ? " (resolved only)" : ""));
       } catch (error) {
         setBusy(false, "");
         els.status.innerHTML = '<span class="error">' + escapeHtml(error.message || String(error)) + '</span>';
@@ -583,7 +595,6 @@
         const url = new URL(POSITIONS_URL);
         url.searchParams.set("user", wallet);
         url.searchParams.set("sizeThreshold", "0");
-        url.searchParams.set("redeemable", "false");
         url.searchParams.set("limit", String(limit));
         url.searchParams.set("offset", String(offset));
         url.searchParams.set("sortBy", "TOKENS");
@@ -630,7 +641,7 @@
       });
     }
 
-    function buildDashboard(wallet, activityRows, positionRows, maxShares, range) {
+    function buildDashboard(wallet, activityRows, positionRows, maxShares, range, resolvedOnly) {
       const positionsByAsset = new Map();
       for (const row of positionRows) {
         const asset = String(row.asset || row.assetId || row.tokenId || "");
@@ -669,6 +680,7 @@
         });
         const first = fills[0];
         const position = positionsByAsset.get(asset) || {};
+        if (resolvedOnly && !isResolvedPosition(position)) continue;
         const timestamps = fills.map((row) => Number(row.timestamp || 0)).filter((value) => value > 0);
         const rawTotalShares = sum(fills.map((row) => dec(row.size)));
         const totalShares = roundedShareCount(rawTotalShares);
@@ -703,6 +715,7 @@
       return {
         user: wallet,
         max_filled_shares: maxShares,
+        resolved_only: resolvedOnly,
         time_range: {
           start: range.startIso || null,
           end: range.endIso || null,
@@ -838,6 +851,17 @@
       });
     }
 
+    function toggleResolved() {
+      state.resolvedOnly = !state.resolvedOnly;
+      updateResolvedButton();
+      refresh();
+    }
+
+    function updateResolvedButton() {
+      els.resolved.classList.toggle("active", state.resolvedOnly);
+      els.resolved.setAttribute("aria-pressed", state.resolvedOnly ? "true" : "false");
+    }
+
     function copyLink() {
       const wallet = els.wallet.value.trim();
       const maxShares = els.max.value || "500";
@@ -868,7 +892,12 @@
       params.set("pages", String(pages));
       if (range.startInput) params.set("start", range.startInput);
       if (range.endInput) params.set("end", range.endInput);
+      if (state.resolvedOnly) params.set("resolved", "1");
       window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+    }
+
+    function isResolvedPosition(position) {
+      return position && position.redeemable === true;
     }
 
     function selectedTimeRange() {
