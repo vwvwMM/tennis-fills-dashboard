@@ -112,7 +112,7 @@
       max-width: 1480px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: minmax(280px, 2fr) minmax(140px, 0.7fr) minmax(140px, 0.7fr) minmax(220px, 1fr);
+      grid-template-columns: minmax(280px, 1.6fr) minmax(120px, 0.55fr) minmax(120px, 0.55fr) minmax(190px, 0.95fr) minmax(190px, 0.95fr) minmax(220px, 1fr);
       gap: 12px;
       align-items: end;
     }
@@ -402,6 +402,14 @@
           <input id="pagesInput" inputmode="numeric" value="7">
         </label>
         <label>
+          Start time
+          <input id="startInput" type="datetime-local">
+        </label>
+        <label>
+          End time
+          <input id="endInput" type="datetime-local">
+        </label>
+        <label>
           Search
           <input id="searchInput" placeholder="slug, title, outcome, token">
         </label>
@@ -479,6 +487,8 @@
       wallet: document.getElementById("walletInput"),
       max: document.getElementById("maxInput"),
       pages: document.getElementById("pagesInput"),
+      start: document.getElementById("startInput"),
+      end: document.getElementById("endInput"),
       search: document.getElementById("searchInput"),
       refresh: document.getElementById("refreshBtn"),
       copy: document.getElementById("copyLinkBtn"),
@@ -501,10 +511,14 @@
       els.wallet.value = params.get("wallet") || DEFAULT_WALLET;
       els.max.value = params.get("max") || "500";
       els.pages.value = params.get("pages") || "7";
+      els.start.value = params.get("start") || "";
+      els.end.value = params.get("end") || "";
       els.refresh.addEventListener("click", refresh);
       els.copy.addEventListener("click", copyLink);
       els.json.addEventListener("click", downloadJson);
       els.search.addEventListener("input", renderRows);
+      els.start.addEventListener("change", refresh);
+      els.end.addEventListener("change", refresh);
       document.querySelectorAll("[data-sort]").forEach((button) => {
         button.addEventListener("click", () => setSort(button.dataset.sort));
       });
@@ -515,14 +529,15 @@
       const wallet = els.wallet.value.trim();
       const maxShares = Math.max(0, Number(els.max.value || "500"));
       const pages = Math.max(1, Math.min(7, Number.parseInt(els.pages.value || "7", 10)));
+      const range = selectedTimeRange();
       setBusy(true, "Loading public activity and positions...");
-      updateUrl(wallet, maxShares, pages);
+      updateUrl(wallet, maxShares, pages, range);
       try {
         const [activity, positions] = await Promise.all([
           fetchActivity(wallet, pages),
           fetchPositions(wallet),
         ]);
-        state.payload = buildDashboard(wallet, activity, positions, maxShares);
+        state.payload = buildDashboard(wallet, activity, positions, maxShares, range);
         state.rows = state.payload.positions;
         renderMetrics(state.payload);
         renderRows();
@@ -614,7 +629,7 @@
       });
     }
 
-    function buildDashboard(wallet, activityRows, positionRows, maxShares) {
+    function buildDashboard(wallet, activityRows, positionRows, maxShares, range) {
       const positionsByAsset = new Map();
       for (const row of positionRows) {
         const asset = String(row.asset || row.assetId || row.tokenId || "");
@@ -627,7 +642,9 @@
         if (String(row.side || "").toUpperCase() !== "BUY") continue;
         const asset = String(row.asset || row.assetId || row.tokenId || "");
         const size = dec(row.size);
+        const timestamp = Number(row.timestamp || 0);
         if (!asset || size <= 0) continue;
+        if (!inRange(timestamp, range)) continue;
         if (!fillsByAsset.has(asset)) fillsByAsset.set(asset, []);
         fillsByAsset.get(asset).push(row);
       }
@@ -672,6 +689,10 @@
       return {
         user: wallet,
         max_filled_shares: maxShares,
+        time_range: {
+          start: range.startIso || null,
+          end: range.endIso || null,
+        },
         summary: {
           positions_with_buy_fills: rows.length,
           buy_fill_count: sum(rows.map((row) => row.fill_count)),
@@ -785,8 +806,8 @@
     function copyLink() {
       const wallet = els.wallet.value.trim();
       const maxShares = els.max.value || "500";
-      const pages = els.pages.value || "20";
-      updateUrl(wallet, maxShares, pages);
+      const pages = els.pages.value || "7";
+      updateUrl(wallet, maxShares, pages, selectedTimeRange());
       navigator.clipboard.writeText(window.location.href).then(() => {
         els.status.textContent = "Link copied";
       }).catch(() => {
@@ -805,12 +826,36 @@
       URL.revokeObjectURL(url);
     }
 
-    function updateUrl(wallet, maxShares, pages) {
+    function updateUrl(wallet, maxShares, pages, range) {
       const params = new URLSearchParams();
       params.set("wallet", wallet);
       params.set("max", String(maxShares));
       params.set("pages", String(pages));
+      if (range.startInput) params.set("start", range.startInput);
+      if (range.endInput) params.set("end", range.endInput);
       window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+    }
+
+    function selectedTimeRange() {
+      const startInput = els.start.value || "";
+      const endInput = els.end.value || "";
+      const startMs = startInput ? Date.parse(startInput) : NaN;
+      const endMs = endInput ? Date.parse(endInput) : NaN;
+      return {
+        startInput,
+        endInput,
+        start: Number.isFinite(startMs) ? Math.floor(startMs / 1000) : null,
+        end: Number.isFinite(endMs) ? Math.floor(endMs / 1000) : null,
+        startIso: Number.isFinite(startMs) ? new Date(startMs).toISOString() : null,
+        endIso: Number.isFinite(endMs) ? new Date(endMs).toISOString() : null,
+      };
+    }
+
+    function inRange(timestamp, range) {
+      if (!timestamp) return true;
+      if (range.start != null && timestamp < range.start) return false;
+      if (range.end != null && timestamp > range.end) return false;
+      return true;
     }
 
     function setBusy(isBusy, text) {
