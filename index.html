@@ -451,6 +451,11 @@
           <div class="value" id="metricMaxed">-</div>
           <div class="sub" id="metricMaxedSub">threshold</div>
         </div>
+        <div class="metric">
+          <div class="label">Positive drift</div>
+          <div class="value" id="metricDrift">-</div>
+          <div class="sub" id="metricDriftSub">fill pressure</div>
+        </div>
       </section>
 
       <div class="status">
@@ -470,6 +475,8 @@
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="current_position_shares">Current shares</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="first_fill_price">First price</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="max_fill_price">Max price</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="fill_price_drift">Drift</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="fill_pressure_score">Pressure</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="average_fill_price">Avg price</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="average_seconds_between_fills">Avg gap</button></th>
                 <th aria-sort="none"><button class="sort-btn" type="button" data-sort="current_value">Current value</button></th>
@@ -478,7 +485,7 @@
               </tr>
             </thead>
             <tbody id="rowsBody">
-              <tr><td class="empty" colspan="12">No data loaded</td></tr>
+              <tr><td class="empty" colspan="14">No data loaded</td></tr>
             </tbody>
           </table>
         </div>
@@ -512,6 +519,8 @@
       avgShares: document.getElementById("metricAvgShares"),
       maxed: document.getElementById("metricMaxed"),
       maxedSub: document.getElementById("metricMaxedSub"),
+      drift: document.getElementById("metricDrift"),
+      driftSub: document.getElementById("metricDriftSub"),
     };
 
     init();
@@ -688,6 +697,10 @@
         const totalCost = sum(fills.map(fillCost));
         const prices = fills.map(fillPrice);
         const averagePrice = rawTotalShares > 0 ? totalCost / rawTotalShares : 0;
+        const firstPrice = prices[0] || 0;
+        const maxPrice = prices.length ? Math.max(...prices) : 0;
+        const fillPriceDrift = maxPrice - firstPrice;
+        const fillPressureScore = Math.max(0, fillPriceDrift) * totalShares;
         const lastTs = timestamps.length ? timestamps[timestamps.length - 1] : null;
         rows.push({
           asset,
@@ -699,8 +712,10 @@
           net_filled_shares: netFilledShares,
           total_cost: totalCost,
           average_fill_price: averagePrice,
-          first_fill_price: prices[0] || 0,
-          max_fill_price: prices.length ? Math.max(...prices) : 0,
+          first_fill_price: firstPrice,
+          max_fill_price: maxPrice,
+          fill_price_drift: fillPriceDrift,
+          fill_pressure_score: fillPressureScore,
           first_fill_timestamp: timestamps.length ? timestamps[0] : null,
           last_fill_timestamp: lastTs,
           average_seconds_between_fills: averageGap(timestamps),
@@ -715,6 +730,8 @@
       }
       rows.sort((a, b) => (b.last_fill_timestamp || 0) - (a.last_fill_timestamp || 0) || b.total_filled_shares - a.total_filled_shares);
       const reached = rows.filter((row) => row.reached_max_filled_shares).length;
+      const positiveDrift = rows.filter((row) => row.fill_price_drift > 0).length;
+      const totalPressure = sum(rows.map((row) => row.fill_pressure_score));
       return {
         user: wallet,
         max_filled_shares: maxShares,
@@ -730,6 +747,10 @@
           average_total_filled_shares_across_positions: rows.length ? sum(rows.map((row) => row.total_filled_shares)) / rows.length : 0,
           positions_reached_max_filled_size: reached,
           percent_positions_reached_max_filled_size: rows.length ? reached * 100 / rows.length : 0,
+          positions_with_positive_fill_price_drift: positiveDrift,
+          percent_positions_with_positive_fill_price_drift: rows.length ? positiveDrift * 100 / rows.length : 0,
+          average_fill_price_drift: rows.length ? sum(rows.map((row) => row.fill_price_drift)) / rows.length : 0,
+          total_fill_pressure_score: totalPressure,
         },
         positions: rows,
       };
@@ -743,6 +764,8 @@
       els.avgShares.textContent = fmtNum(summary.average_total_filled_shares_across_positions);
       els.maxed.textContent = fmtNum(summary.percent_positions_reached_max_filled_size) + "%";
       els.maxedSub.textContent = fmtInt(summary.positions_reached_max_filled_size) + " at or above " + fmtNum(payload.max_filled_shares) + "sh";
+      els.drift.textContent = fmtNum(summary.percent_positions_with_positive_fill_price_drift) + "%";
+      els.driftSub.textContent = fmtInt(summary.positions_with_positive_fill_price_drift) + " positive, pressure " + fmtNum(summary.total_fill_pressure_score);
     }
 
     function renderRows() {
@@ -754,7 +777,7 @@
       rows.sort(compareRows);
       updateSortHeaders();
       if (!rows.length) {
-        els.body.innerHTML = '<tr><td class="empty" colspan="12">No matching positions</td></tr>';
+        els.body.innerHTML = '<tr><td class="empty" colspan="14">No matching positions</td></tr>';
         return;
       }
       els.body.innerHTML = rows.map((row) => {
@@ -770,6 +793,8 @@
           '<td>' + fmtNum(row.current_position_shares) + '</td>' +
           '<td>' + fmtPrice(row.first_fill_price) + '</td>' +
           '<td class="' + (row.max_fill_price >= 0.5 ? "warn" : "") + '">' + fmtPrice(row.max_fill_price) + '</td>' +
+          '<td class="' + signedClass(row.fill_price_drift) + '">' + fmtSignedPrice(row.fill_price_drift) + '</td>' +
+          '<td>' + fmtNum(row.fill_pressure_score) + '</td>' +
           '<td>' + fmtPrice(row.average_fill_price) + '</td>' +
           '<td>' + gap + '</td>' +
           '<td>' + fmtNum(row.current_value) + '</td>' +
@@ -985,6 +1010,14 @@
 
     function fmtPrice(value) {
       return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    }
+
+    function fmtSignedPrice(value) {
+      const number = Number(value || 0);
+      const formatted = fmtPrice(Math.abs(number));
+      if (number > 0) return "+" + formatted;
+      if (number < 0) return "-" + formatted;
+      return formatted;
     }
 
     function fmtDuration(seconds) {
