@@ -656,7 +656,7 @@
       for (const [asset, fills] of fillsByAsset.entries()) {
         const first = fills[0] || {};
         const key = marketKey(first);
-        const shares = sum(fills.map((row) => dec(row.size)));
+        const shares = roundedShareCount(sum(fills.map((row) => dec(row.size))));
         assetFillShares.set(asset, shares);
         if (!marketFillShares.has(key)) marketFillShares.set(key, new Map());
         marketFillShares.get(key).set(asset, shares);
@@ -670,11 +670,12 @@
         const first = fills[0];
         const position = positionsByAsset.get(asset) || {};
         const timestamps = fills.map((row) => Number(row.timestamp || 0)).filter((value) => value > 0);
-        const totalShares = sum(fills.map((row) => dec(row.size)));
+        const rawTotalShares = sum(fills.map((row) => dec(row.size)));
+        const totalShares = roundedShareCount(rawTotalShares);
         const netFilledShares = totalShares - oppositeFilledShares(asset, first, assetFillShares, marketFillShares);
         const totalCost = sum(fills.map(fillCost));
         const prices = fills.map(fillPrice);
-        const averagePrice = totalShares > 0 ? totalCost / totalShares : 0;
+        const averagePrice = rawTotalShares > 0 ? totalCost / rawTotalShares : 0;
         const lastTs = timestamps.length ? timestamps[timestamps.length - 1] : null;
         rows.push({
           asset,
@@ -900,6 +901,12 @@
     function dec(value) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function roundedShareCount(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number)) return 0;
+      return Math.ceil(Math.max(0, number) - 1e-9);
     }
 
     function sum(values) {
