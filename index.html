@@ -228,6 +228,43 @@
       white-space: nowrap;
     }
 
+    .sort-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px;
+      width: 100%;
+      min-height: 24px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+      font-weight: inherit;
+      text-align: inherit;
+    }
+
+    .sort-btn.left {
+      justify-content: flex-start;
+    }
+
+    .sort-btn::after {
+      content: "↕";
+      color: #7b8794;
+      font-size: 11px;
+    }
+
+    th[aria-sort="ascending"] .sort-btn::after {
+      content: "↑";
+      color: var(--accent);
+    }
+
+    th[aria-sort="descending"] .sort-btn::after {
+      content: "↓";
+      color: var(--accent);
+    }
+
     tbody td {
       border-bottom: 1px solid #edf0f4;
       padding: 9px;
@@ -410,17 +447,17 @@
           <table>
             <thead>
               <tr>
-                <th class="left">Position</th>
-                <th>Fills</th>
-                <th>Filled shares</th>
-                <th>Current shares</th>
-                <th>First price</th>
-                <th>Max price</th>
-                <th>Avg price</th>
-                <th>Avg gap</th>
-                <th>Current value</th>
-                <th>Progress</th>
-                <th>Last fill</th>
+                <th class="left" aria-sort="none"><button class="sort-btn left" type="button" data-sort="position">Position</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="fill_count">Fills</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="total_filled_shares">Filled shares</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="current_position_shares">Current shares</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="first_fill_price">First price</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="max_fill_price">Max price</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="average_fill_price">Avg price</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="average_seconds_between_fills">Avg gap</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="current_value">Current value</button></th>
+                <th aria-sort="none"><button class="sort-btn" type="button" data-sort="progress">Progress</button></th>
+                <th aria-sort="descending"><button class="sort-btn" type="button" data-sort="last_fill_timestamp">Last fill</button></th>
               </tr>
             </thead>
             <tbody id="rowsBody">
@@ -436,7 +473,7 @@
     const DEFAULT_WALLET = "0xD03450276D4Aa4069ce11bAC4CFb1683a724EecE";
     const ACTIVITY_URL = "https://data-api.polymarket.com/activity";
     const POSITIONS_URL = "https://data-api.polymarket.com/positions";
-    const state = { payload: null, rows: [] };
+    const state = { payload: null, rows: [], sortKey: "last_fill_timestamp", sortDirection: "desc" };
 
     const els = {
       wallet: document.getElementById("walletInput"),
@@ -468,6 +505,9 @@
       els.copy.addEventListener("click", copyLink);
       els.json.addEventListener("click", downloadJson);
       els.search.addEventListener("input", renderRows);
+      document.querySelectorAll("[data-sort]").forEach((button) => {
+        button.addEventListener("click", () => setSort(button.dataset.sort));
+      });
       refresh();
     }
 
@@ -660,6 +700,8 @@
         if (!query) return true;
         return [row.asset, row.slug, row.title, row.outcome].some((value) => String(value || "").toLowerCase().includes(query));
       });
+      rows.sort(compareRows);
+      updateSortHeaders();
       if (!rows.length) {
         els.body.innerHTML = '<tr><td class="empty" colspan="11">No matching positions</td></tr>';
         return;
@@ -683,6 +725,61 @@
           '<td>' + last + '</td>' +
         '</tr>';
       }).join("");
+    }
+
+    function setSort(key) {
+      if (!key) return;
+      if (state.sortKey === key) {
+        state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
+      } else {
+        state.sortKey = key;
+        state.sortDirection = defaultDirection(key);
+      }
+      renderRows();
+    }
+
+    function compareRows(left, right) {
+      const key = state.sortKey;
+      const direction = state.sortDirection === "asc" ? 1 : -1;
+      const leftValue = sortValue(left, key);
+      const rightValue = sortValue(right, key);
+      let result = 0;
+      if (typeof leftValue === "string" || typeof rightValue === "string") {
+        result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: "base" });
+      } else {
+        result = Number(leftValue || 0) - Number(rightValue || 0);
+      }
+      if (result === 0 && key !== "last_fill_timestamp") {
+        result = Number(right.last_fill_timestamp || 0) - Number(left.last_fill_timestamp || 0);
+      }
+      return result * direction;
+    }
+
+    function sortValue(row, key) {
+      if (key === "position") return (row.slug || row.title || row.outcome || row.asset || "").toLowerCase();
+      if (key === "progress") {
+        const maxShares = Number(state.payload?.max_filled_shares || 500);
+        return maxShares > 0 ? row.total_filled_shares * 100 / maxShares : 0;
+      }
+      const value = row[key];
+      return value == null ? 0 : value;
+    }
+
+    function defaultDirection(key) {
+      return key === "position" ? "asc" : "desc";
+    }
+
+    function updateSortHeaders() {
+      document.querySelectorAll("[data-sort]").forEach((button) => {
+        const th = button.closest("th");
+        if (!th) return;
+        th.setAttribute(
+          "aria-sort",
+          button.dataset.sort === state.sortKey
+            ? (state.sortDirection === "asc" ? "ascending" : "descending")
+            : "none"
+        );
+      });
     }
 
     function copyLink() {
