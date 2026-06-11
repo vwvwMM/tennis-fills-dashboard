@@ -362,7 +362,7 @@
         </label>
         <label>
           Pages
-          <input id="pagesInput" inputmode="numeric" value="20">
+          <input id="pagesInput" inputmode="numeric" value="7">
         </label>
         <label>
           Search
@@ -463,7 +463,7 @@
       const params = new URLSearchParams(window.location.search);
       els.wallet.value = params.get("wallet") || DEFAULT_WALLET;
       els.max.value = params.get("max") || "500";
-      els.pages.value = params.get("pages") || "20";
+      els.pages.value = params.get("pages") || "7";
       els.refresh.addEventListener("click", refresh);
       els.copy.addEventListener("click", copyLink);
       els.json.addEventListener("click", downloadJson);
@@ -474,7 +474,7 @@
     async function refresh() {
       const wallet = els.wallet.value.trim();
       const maxShares = Math.max(0, Number(els.max.value || "500"));
-      const pages = Math.max(1, Math.min(100, Number.parseInt(els.pages.value || "20", 10)));
+      const pages = Math.max(1, Math.min(7, Number.parseInt(els.pages.value || "7", 10)));
       setBusy(true, "Loading public activity and positions...");
       updateUrl(wallet, maxShares, pages);
       try {
@@ -502,7 +502,15 @@
         url.searchParams.set("user", wallet);
         url.searchParams.set("limit", String(limit));
         url.searchParams.set("offset", String(page * limit));
-        const batch = await fetchJson(url);
+        let batch;
+        try {
+          batch = await fetchJson(url);
+        } catch (error) {
+          if (page > 0 && String(error.message || error).includes("HTTP 400")) {
+            break;
+          }
+          throw error;
+        }
         if (!Array.isArray(batch)) {
           throw new Error("Unexpected activity response");
         }
