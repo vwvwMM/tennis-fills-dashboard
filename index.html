@@ -710,6 +710,9 @@
           reached_max_filled_shares: totalShares >= maxShares,
         });
       }
+      for (const row of rows) {
+        row.progress_shares = Math.abs(row.net_filled_shares);
+      }
       rows.sort((a, b) => (b.last_fill_timestamp || 0) - (a.last_fill_timestamp || 0) || b.total_filled_shares - a.total_filled_shares);
       const reached = rows.filter((row) => row.reached_max_filled_shares).length;
       return {
@@ -756,7 +759,7 @@
       }
       els.body.innerHTML = rows.map((row) => {
         const maxShares = Number(state.payload.max_filled_shares || 500);
-        const pct = maxShares > 0 ? Math.min(100, row.total_filled_shares * 100 / maxShares) : 0;
+        const pct = maxShares > 0 ? Math.min(100, row.progress_shares * 100 / maxShares) : 0;
         const gap = row.average_seconds_between_fills == null ? "-" : fmtDuration(row.average_seconds_between_fills);
         const last = row.last_fill_timestamp ? formatTime(row.last_fill_timestamp) : "-";
         return '<tr>' +
@@ -808,7 +811,7 @@
       if (key === "position") return (row.slug || row.title || row.outcome || row.asset || "").toLowerCase();
       if (key === "progress") {
         const maxShares = Number(state.payload?.max_filled_shares || 500);
-        return maxShares > 0 ? row.total_filled_shares * 100 / maxShares : 0;
+        return maxShares > 0 ? row.progress_shares * 100 / maxShares : 0;
       }
       const value = row[key];
       return value == null ? 0 : value;
