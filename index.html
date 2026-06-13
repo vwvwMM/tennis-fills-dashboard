@@ -422,6 +422,53 @@
       </section>
     </section>
 
+    <section class="grid-2">
+      <section class="section">
+        <div class="section-header">
+          <div><h2>Target Games By Day</h2><div class="section-sub">Active tennis moneyline games from Gamma market discovery</div></div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Day</th><th>Target Games</th><th>Upcoming</th><th>First Start</th><th>Last Start</th></tr></thead>
+            <tbody id="targetGamesBody"><tr><td class="empty" colspan="5">No data loaded</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div><h2>Fill Shares By Hour</h2><div class="section-sub">BUY fill shares aggregated by hour</div></div>
+        </div>
+        <div class="chart" id="fillSharesChart"></div>
+      </section>
+    </section>
+
+    <section class="grid-2">
+      <section class="section">
+        <div class="section-header">
+          <div><h2>Hourly Fill Activity</h2><div class="section-sub">Filled games and shares from public activity rows</div></div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Hour</th><th>Filled Shares</th><th>Fill Count</th><th>Filled Games</th><th>Avg Price</th><th>Cash Spent</th></tr></thead>
+            <tbody id="fillActivityBody"><tr><td class="empty" colspan="6">No data loaded</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div><h2>Order Attempts By Hour</h2><div class="section-sub">Requires bot log feed; static public activity only shows fills</div></div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Hour</th><th>Attempted Games</th><th>Attempt Count</th><th class="left">Source</th></tr></thead>
+            <tbody id="orderAttemptsBody"><tr><td class="empty" colspan="4">No data loaded</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
     <section class="section">
       <div class="section-header">
         <div><h2>Current Open Tennis Positions</h2><div class="section-sub">Default sort: age desc, fill progress asc, value desc</div></div>
@@ -491,6 +538,9 @@
     const DEFAULT_WALLET = "0xD03450276D4Aa4069ce11bAC4CFb1683a724EecE";
     const ACTIVITY_URL = "https://data-api.polymarket.com/activity";
     const POSITIONS_URL = "https://data-api.polymarket.com/positions";
+    const GAMMA_URL = "https://gamma-api.polymarket.com";
+    const TENNIS_SERIES_IDS = ["10366", "10365", "11634", "11632", "11633"];
+    const EXCLUDED_PLAYER_RE = /\bsinner\b/i;
     const POLYGON_RPCS = ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com", "https://rpc.ankr.com/polygon"];
     const PUSD_TOKEN = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
     const USDCE_TOKEN = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
@@ -519,9 +569,13 @@
       closedBody: document.getElementById("closedBody"),
       dailyBody: document.getElementById("dailyBody"),
       precisionBody: document.getElementById("precisionBody"),
+      targetGamesBody: document.getElementById("targetGamesBody"),
+      fillActivityBody: document.getElementById("fillActivityBody"),
+      orderAttemptsBody: document.getElementById("orderAttemptsBody"),
       sizeStats: document.getElementById("sizeStats"),
       equityChart: document.getElementById("equityChart"),
       okRatioChart: document.getElementById("okRatioChart"),
+      fillSharesChart: document.getElementById("fillSharesChart"),
       closedPrev: document.getElementById("closedPrevBtn"),
       closedNext: document.getElementById("closedNextBtn"),
       closedPageText: document.getElementById("closedPageText"),
@@ -557,18 +611,22 @@
       updateUrl();
       setBusy(true, "Loading account dashboard data...");
       try {
-        const [activityRows, positionRows, balances] = await Promise.all([
+        const [activityRows, positionRows, balances, targetMarketResult] = await Promise.all([
           fetchActivity(wallet, pages, force),
           fetchPositions(wallet, force),
           fetchCollateralBalances(wallet, force),
+          fetchTargetMarkets(force).catch((error) => ({ error: error.message || String(error), rows: [] })),
         ]);
         const cash = cashOverridden ? num(cashOverrideText) : balances.cash;
+        const targetMarkets = Array.isArray(targetMarketResult) ? targetMarketResult : (targetMarketResult.rows || []);
+        const targetMarketError = Array.isArray(targetMarketResult) ? "" : targetMarketResult.error;
         if (!cashOverridden) els.cash.placeholder = "auto " + fmtUsd(cash);
         state.closedPage = 0;
-        state.payload = buildDashboard({ wallet, cash, cashSource: cashOverridden ? "override" : "onchain", balances, targetShares, okThreshold, activityRows, positionRows });
+        state.payload = buildDashboard({ wallet, cash, cashSource: cashOverridden ? "override" : "onchain", balances, targetShares, okThreshold, activityRows, positionRows, targetMarkets, targetMarketError });
         storeSnapshot(wallet, state.payload.account_snapshot);
         renderAll();
-        setBusy(false, "Loaded " + activityRows.length.toLocaleString() + " activity rows, " + positionRows.length.toLocaleString() + " position rows, cash " + fmtUsd(cash));
+        const targetStatus = targetMarketError ? ", target games unavailable" : ", " + targetMarkets.length.toLocaleString() + " target games";
+        setBusy(false, "Loaded " + activityRows.length.toLocaleString() + " activity rows, " + positionRows.length.toLocaleString() + " position rows" + targetStatus + ", cash " + fmtUsd(cash));
         els.freshness.textContent = "Last refreshed " + new Date().toLocaleString();
       } catch (error) {
         setBusy(false, "");
@@ -668,13 +726,91 @@
       return rows;
     }
 
+    async function fetchTargetMarkets(force) {
+      const cache = await readCache("target-markets", 900, force);
+      if (cache) return cache;
+      const events = [];
+      const limit = 100;
+      for (const seriesId of TENNIS_SERIES_IDS) {
+        for (let page = 0; page < 20; page += 1) {
+          const url = new URL(GAMMA_URL + "/events");
+          url.searchParams.set("series_id", seriesId);
+          url.searchParams.set("active", "true");
+          url.searchParams.set("closed", "false");
+          url.searchParams.set("archived", "false");
+          url.searchParams.set("limit", String(limit));
+          url.searchParams.set("offset", String(page * limit));
+          const batch = await fetchJson(url);
+          if (!Array.isArray(batch)) throw new Error("Unexpected Gamma events response");
+          events.push(...batch);
+          if (batch.length < limit) break;
+        }
+      }
+      const marketsByKey = new Map();
+      for (const event of events) {
+        for (const market of Array.isArray(event.markets) ? event.markets : []) {
+          const target = targetMarketFromGamma(event, market);
+          if (!target) continue;
+          marketsByKey.set(target.condition_id || target.slug || target.market, target);
+        }
+      }
+      const rows = Array.from(marketsByKey.values()).sort((a, b) => (a.game_start_timestamp || 0) - (b.game_start_timestamp || 0));
+      writeCache("target-markets", rows);
+      return rows;
+    }
+
     async function fetchJson(url) {
       const response = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
       if (!response.ok) throw new Error("HTTP " + response.status + " from " + url.hostname);
       return response.json();
     }
 
-    function buildDashboard({ wallet, cash, cashSource, balances, targetShares, okThreshold, activityRows, positionRows }) {
+    function targetMarketFromGamma(event, market) {
+      const title = String(market.question || market.title || event.title || event.slug || "");
+      const slug = String(market.slug || event.slug || "");
+      const joined = [
+        title,
+        slug,
+        market.description,
+        market.outcomes,
+        event.title,
+        event.slug,
+      ].map((value) => String(value || "")).join(" ");
+      if (EXCLUDED_PLAYER_RE.test(joined)) return null;
+      if (!market.active || market.closed || market.archived) return null;
+      if (market.enableOrderBook === false || market.acceptingOrders === false) return null;
+      if (String(market.sportsMarketType || "").toLowerCase() !== "moneyline") return null;
+      const start = parseGammaTime(market.gameStartTime || event.startTime || event.startDate);
+      const tokens = parseJsonList(market.clobTokenIds);
+      const outcomes = parseJsonList(market.outcomes);
+      if (tokens.length < 2 || outcomes.length < 2) return null;
+      return {
+        market: title || slug || String(market.conditionId || ""),
+        slug,
+        condition_id: String(market.conditionId || market.condition_id || ""),
+        game_start_time: start ? formatTime(start) : "",
+        game_start_timestamp: start,
+      };
+    }
+
+    function parseGammaTime(value) {
+      if (!value) return 0;
+      const parsed = Date.parse(String(value));
+      return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+    }
+
+    function parseJsonList(value) {
+      if (Array.isArray(value)) return value;
+      if (value == null || value === "") return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+      }
+    }
+
+    function buildDashboard({ wallet, cash, cashSource, balances, targetShares, okThreshold, activityRows, positionRows, targetMarkets, targetMarketError }) {
       const snapshotTime = Math.floor(Date.now() / 1000);
       const buyFills = new Map();
       const trades = new Map();
@@ -757,10 +893,16 @@
         closed_position_ok_ratio_series: okRatioSeries(closedPositions),
         daily_closed_position_stats: dailyStats(closedPositions),
         precision_samples: precisionSamples(activityRows, targetShares, okThreshold),
+        target_games_by_day: targetGamesByDay(targetMarkets || [], snapshotTime),
+        target_games_error: targetMarketError || "",
+        fill_activity_by_hour: fillActivityByHour(activityRows),
+        order_attempts_by_hour: [],
+        order_attempts_source: "Bot log feed is not connected to this static Worker dashboard.",
         cache_policy: {
           open_positions_refresh_seconds: 900,
           account_snapshot_refresh_seconds: 900,
           cash_balance_refresh_seconds: 60,
+          target_games_refresh_seconds: 900,
           closed_positions_refresh_mode: "cached activity pages",
           precision_sampling_refresh_seconds: 60,
         },
@@ -900,6 +1042,63 @@
         });
     }
 
+    function targetGamesByDay(targetMarkets, now) {
+      const byDay = new Map();
+      for (const market of targetMarkets) {
+        const start = Number(market.game_start_timestamp || 0);
+        const day = start ? new Date(start * 1000).toISOString().slice(0, 10) : "Unknown";
+        const current = byDay.get(day) || { day, target_games: 0, upcoming_games: 0, first_start_timestamp: 0, last_start_timestamp: 0 };
+        current.target_games += 1;
+        if (!start || start >= now) current.upcoming_games += 1;
+        if (start && (!current.first_start_timestamp || start < current.first_start_timestamp)) current.first_start_timestamp = start;
+        if (start && start > current.last_start_timestamp) current.last_start_timestamp = start;
+        byDay.set(day, current);
+      }
+      return Array.from(byDay.values()).sort((a, b) => {
+        if (a.day === "Unknown") return 1;
+        if (b.day === "Unknown") return -1;
+        return a.day.localeCompare(b.day);
+      }).map((row) => ({
+        ...row,
+        first_start_time: row.first_start_timestamp ? formatTime(row.first_start_timestamp) : "",
+        last_start_time: row.last_start_timestamp ? formatTime(row.last_start_timestamp) : "",
+      }));
+    }
+
+    function fillActivityByHour(activityRows) {
+      const byHour = new Map();
+      for (const row of activityRows) {
+        if (String(row.type || "").toUpperCase() !== "TRADE") continue;
+        if (String(row.side || "").toUpperCase() !== "BUY") continue;
+        const timestamp = Number(row.timestamp || 0);
+        const shares = num(row.size);
+        if (!timestamp || shares <= 0) continue;
+        const hourTimestamp = Math.floor(timestamp / 3600) * 3600;
+        const current = byHour.get(hourTimestamp) || {
+          hour_timestamp: hourTimestamp,
+          hour: formatHour(hourTimestamp),
+          filled_shares: 0,
+          fill_count: 0,
+          cash_spent: 0,
+          market_set: new Set(),
+        };
+        current.filled_shares += shares;
+        current.fill_count += 1;
+        current.cash_spent += fillCost(row);
+        current.market_set.add(String(row.slug || row.eventSlug || row.title || conditionId(row) || token(row)));
+        byHour.set(hourTimestamp, current);
+      }
+      return Array.from(byHour.values()).sort((a, b) => a.hour_timestamp - b.hour_timestamp).map((row) => ({
+        hour_timestamp: row.hour_timestamp,
+        hour: row.hour,
+        filled_shares: row.filled_shares,
+        fill_count: row.fill_count,
+        filled_game_count: row.market_set.size,
+        avg_price: row.filled_shares > 0 ? row.cash_spent / row.filled_shares : 0,
+        cash_spent: row.cash_spent,
+      }));
+    }
+
     function sizeStats(rows, okThreshold) {
       const sizes = rows.map((row) => row.closed_shares).sort((a, b) => a - b);
       const ok = sizes.filter((size) => size >= okThreshold).length;
@@ -958,6 +1157,9 @@
       if (!state.payload) return;
       renderMetrics();
       renderCharts();
+      renderTargetGames();
+      renderFillActivity();
+      renderOrderAttempts();
       renderOpenPositions();
       renderClosedPositions();
       renderSizeStats();
@@ -977,6 +1179,47 @@
     function renderCharts() {
       renderLineChart(els.equityChart, state.payload.account_snapshots, "snapshot_timestamp", "equity", fmtUsd);
       renderLineChart(els.okRatioChart, state.payload.closed_position_ok_ratio_series, "close_timestamp", "rolling_ok_ratio", (value) => fmtNum(value) + "%");
+      renderLineChart(els.fillSharesChart, state.payload.fill_activity_by_hour, "hour_timestamp", "filled_shares", fmtNum);
+    }
+
+    function renderTargetGames() {
+      const rows = state.payload.target_games_by_day || [];
+      if (state.payload.target_games_error) {
+        els.targetGamesBody.innerHTML = '<tr><td class="empty" colspan="5">Target games unavailable: ' + escapeHtml(state.payload.target_games_error) + '</td></tr>';
+        return;
+      }
+      if (!rows.length) {
+        els.targetGamesBody.innerHTML = '<tr><td class="empty" colspan="5">No target games found</td></tr>';
+        return;
+      }
+      els.targetGamesBody.innerHTML = rows.map((row) => '<tr>' +
+        '<td>' + escapeHtml(row.day) + '</td><td>' + fmtInt(row.target_games) + '</td><td>' + fmtInt(row.upcoming_games) + '</td>' +
+        '<td>' + escapeHtml(row.first_start_time || "-") + '</td><td>' + escapeHtml(row.last_start_time || "-") + '</td></tr>'
+      ).join("");
+    }
+
+    function renderFillActivity() {
+      const rows = (state.payload.fill_activity_by_hour || []).slice().reverse();
+      if (!rows.length) {
+        els.fillActivityBody.innerHTML = '<tr><td class="empty" colspan="6">No BUY fill activity</td></tr>';
+        return;
+      }
+      els.fillActivityBody.innerHTML = rows.slice(0, 120).map((row) => '<tr>' +
+        '<td>' + escapeHtml(row.hour) + '</td><td>' + fmtNum(row.filled_shares) + '</td><td>' + fmtInt(row.fill_count) + '</td>' +
+        '<td>' + fmtInt(row.filled_game_count) + '</td><td>' + fmtPrice(row.avg_price) + '</td><td>' + fmtUsd(row.cash_spent) + '</td></tr>'
+      ).join("");
+    }
+
+    function renderOrderAttempts() {
+      const rows = state.payload.order_attempts_by_hour || [];
+      if (!rows.length) {
+        els.orderAttemptsBody.innerHTML = '<tr><td class="empty" colspan="4">Not available from public activity data. Connect a backend or tunnel that parses MM logs to populate true order-attempt counts.</td></tr>';
+        return;
+      }
+      els.orderAttemptsBody.innerHTML = rows.slice().reverse().map((row) => '<tr>' +
+        '<td>' + escapeHtml(row.hour || "") + '</td><td>' + fmtInt(row.attempted_game_count) + '</td><td>' + fmtInt(row.attempt_count) + '</td>' +
+        '<td class="left">' + escapeHtml(row.source || "") + '</td></tr>'
+      ).join("");
     }
 
     function renderOpenPositions() {
@@ -1179,6 +1422,11 @@
     function formatTime(timestamp) {
       if (!timestamp) return "";
       return new Date(Number(timestamp) * 1000).toISOString().replace("T", " ").slice(0, 19);
+    }
+
+    function formatHour(timestamp) {
+      if (!timestamp) return "";
+      return new Date(Number(timestamp) * 1000).toISOString().replace("T", " ").slice(0, 13) + ":00";
     }
 
     function fmtDuration(seconds) {
