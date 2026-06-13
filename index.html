@@ -383,7 +383,7 @@
   <section class="control-band">
     <div class="controls control-grid">
       <label>Wallet<input id="walletInput" spellcheck="false" autocomplete="off"></label>
-      <label>Cash<input id="cashInput" inputmode="decimal" value="0"></label>
+      <label>Cash override<input id="cashInput" inputmode="decimal" placeholder="auto"></label>
       <label>Target shares<input id="targetInput" inputmode="decimal" value="4500"></label>
       <label>OK threshold<input id="okInput" inputmode="decimal" value="450"></label>
       <label>Activity pages<input id="pagesInput" inputmode="numeric" value="7"></label>
@@ -395,7 +395,7 @@
   <main>
     <section class="metrics" aria-live="polite">
       <div class="metric"><div class="label">Equity</div><div class="value" id="metricEquity">-</div><div class="sub">cash + position value</div></div>
-      <div class="metric"><div class="label">Cash</div><div class="value" id="metricCash">-</div><div class="sub">operator input, cached</div></div>
+      <div class="metric"><div class="label">Cash</div><div class="value" id="metricCash">-</div><div class="sub">pUSD + USDC.e</div></div>
       <div class="metric"><div class="label">Position Value</div><div class="value" id="metricPositionValue">-</div><div class="sub">open mark value</div></div>
       <div class="metric"><div class="label">Open Position Count</div><div class="value" id="metricOpenCount">-</div><div class="sub">current token rows</div></div>
       <div class="metric"><div class="label">Total Share Count</div><div class="value" id="metricShareCount">-</div><div class="sub">open shares</div></div>
@@ -491,6 +491,9 @@
     const DEFAULT_WALLET = "0xD03450276D4Aa4069ce11bAC4CFb1683a724EecE";
     const ACTIVITY_URL = "https://data-api.polymarket.com/activity";
     const POSITIONS_URL = "https://data-api.polymarket.com/positions";
+    const POLYGON_RPCS = ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com", "https://rpc.ankr.com/polygon"];
+    const PUSD_TOKEN = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
+    const USDCE_TOKEN = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
     const CACHE_PREFIX = "tennisAccountDashboard:v1:";
     const state = { payload: null, closedPage: 0 };
 
@@ -529,7 +532,7 @@
     function init() {
       const params = new URLSearchParams(window.location.search);
       els.wallet.value = params.get("wallet") || DEFAULT_WALLET;
-      els.cash.value = params.get("cash") || localStorage.getItem(cacheKey("cash", els.wallet.value)) || "0";
+      els.cash.value = params.has("cash") ? params.get("cash") : "";
       els.target.value = params.get("target") || "4500";
       els.ok.value = params.get("ok") || "450";
       els.pages.value = params.get("pages") || "7";
@@ -546,23 +549,26 @@
 
     async function refresh({ force }) {
       const wallet = els.wallet.value.trim();
-      const cash = num(els.cash.value);
+      const cashOverrideText = els.cash.value.trim();
+      const cashOverridden = cashOverrideText !== "";
       const targetShares = Math.max(0, num(els.target.value) || 4500);
       const okThreshold = Math.max(0, num(els.ok.value) || 450);
       const pages = Math.max(1, Math.min(20, Number.parseInt(els.pages.value || "7", 10)));
-      localStorage.setItem(cacheKey("cash", wallet), String(cash));
       updateUrl();
       setBusy(true, "Loading account dashboard data...");
       try {
-        const [activityRows, positionRows] = await Promise.all([
+        const [activityRows, positionRows, balances] = await Promise.all([
           fetchActivity(wallet, pages, force),
           fetchPositions(wallet, force),
+          fetchCollateralBalances(wallet, force),
         ]);
+        const cash = cashOverridden ? num(cashOverrideText) : balances.cash;
+        if (!cashOverridden) els.cash.placeholder = "auto " + fmtUsd(cash);
         state.closedPage = 0;
-        state.payload = buildDashboard({ wallet, cash, targetShares, okThreshold, activityRows, positionRows });
+        state.payload = buildDashboard({ wallet, cash, cashSource: cashOverridden ? "override" : "onchain", balances, targetShares, okThreshold, activityRows, positionRows });
         storeSnapshot(wallet, state.payload.account_snapshot);
         renderAll();
-        setBusy(false, "Loaded " + activityRows.length.toLocaleString() + " activity rows and " + positionRows.length.toLocaleString() + " position rows");
+        setBusy(false, "Loaded " + activityRows.length.toLocaleString() + " activity rows, " + positionRows.length.toLocaleString() + " position rows, cash " + fmtUsd(cash));
         els.freshness.textContent = "Last refreshed " + new Date().toLocaleString();
       } catch (error) {
         setBusy(false, "");
@@ -594,6 +600,51 @@
       return rows;
     }
 
+    async function fetchCollateralBalances(wallet, force) {
+      const cache = await readCache("balances:" + wallet, 60, force);
+      if (cache) return cache;
+      let lastError = null;
+      for (const rpc of POLYGON_RPCS) {
+        try {
+          const [pusdRaw, usdceRaw] = await Promise.all([
+            erc20BalanceOf(rpc, PUSD_TOKEN, wallet),
+            erc20BalanceOf(rpc, USDCE_TOKEN, wallet),
+          ]);
+          const balances = {
+            pusd: Number(pusdRaw) / 1e6,
+            usdce: Number(usdceRaw) / 1e6,
+          };
+          balances.cash = balances.pusd + balances.usdce;
+          balances.source = rpc;
+          writeCache("balances:" + wallet, balances);
+          return balances;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw new Error("Failed to fetch pUSD/USDC.e cash: " + (lastError?.message || lastError || "unknown RPC error"));
+    }
+
+    async function erc20BalanceOf(rpc, tokenAddress, wallet) {
+      const response = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_call",
+          params: [{
+            to: tokenAddress,
+            data: "0x70a08231" + wallet.toLowerCase().replace(/^0x/, "").padStart(64, "0"),
+          }, "latest"],
+        }),
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status + " from " + new URL(rpc).hostname);
+      const payload = await response.json();
+      if (payload.error) throw new Error(payload.error.message || "RPC error");
+      return parseInt(String(payload.result || "0x0"), 16);
+    }
+
     async function fetchPositions(wallet, force) {
       const cache = await readCache("positions:" + wallet, 900, force);
       if (cache) return cache;
@@ -623,7 +674,7 @@
       return response.json();
     }
 
-    function buildDashboard({ wallet, cash, targetShares, okThreshold, activityRows, positionRows }) {
+    function buildDashboard({ wallet, cash, cashSource, balances, targetShares, okThreshold, activityRows, positionRows }) {
       const snapshotTime = Math.floor(Date.now() / 1000);
       const buyFills = new Map();
       const trades = new Map();
@@ -687,6 +738,8 @@
         snapshot_timestamp: snapshotTime,
         equity: cash + positionValue,
         cash,
+        cash_source: cashSource || "manual",
+        balances: balances || { pusd: cash, usdce: 0, cash },
         position_value: positionValue,
         open_position_count: openPositions.length,
         total_share_count: totalShares,
@@ -707,6 +760,7 @@
         cache_policy: {
           open_positions_refresh_seconds: 900,
           account_snapshot_refresh_seconds: 900,
+          cash_balance_refresh_seconds: 60,
           closed_positions_refresh_mode: "cached activity pages",
           precision_sampling_refresh_seconds: 60,
         },
@@ -1058,7 +1112,7 @@
       if (force) return null;
       try {
         const cached = JSON.parse(localStorage.getItem(CACHE_PREFIX + name) || "null");
-        if (!cached || !Array.isArray(cached.value)) return null;
+        if (!cached || typeof cached !== "object" || !Object.prototype.hasOwnProperty.call(cached, "value")) return null;
         if ((Date.now() - cached.saved_at) / 1000 > ttlSeconds) return null;
         return cached.value;
       } catch {
@@ -1093,7 +1147,7 @@
     function updateUrl() {
       const params = new URLSearchParams();
       params.set("wallet", els.wallet.value.trim());
-      params.set("cash", els.cash.value || "0");
+      if (els.cash.value.trim()) params.set("cash", els.cash.value.trim());
       params.set("target", els.target.value || "4500");
       params.set("ok", els.ok.value || "450");
       params.set("pages", els.pages.value || "7");
