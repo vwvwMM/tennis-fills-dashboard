@@ -580,7 +580,12 @@
         url.searchParams.set("user", wallet);
         url.searchParams.set("limit", String(limit));
         url.searchParams.set("offset", String(page * limit));
-        const batch = await fetchJson(url);
+        const response = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
+        if (!response.ok) {
+          if (response.status === 400 && rows.length) break;
+          throw new Error("HTTP " + response.status + " from " + url.hostname);
+        }
+        const batch = await response.json();
         if (!Array.isArray(batch)) throw new Error("Unexpected activity response");
         rows.push(...batch);
         if (batch.length < limit) break;
@@ -622,13 +627,26 @@
       const snapshotTime = Math.floor(Date.now() / 1000);
       const buyFills = new Map();
       const trades = new Map();
+      const tradesByCondition = new Map();
+      const redeemsByCondition = new Map();
       for (const row of activityRows) {
-        if (String(row.type || "").toUpperCase() !== "TRADE") continue;
+        const type = String(row.type || "").toUpperCase();
+        const condition = conditionId(row);
+        if (type === "REDEEM" && condition && num(row.size) > 0) {
+          if (!redeemsByCondition.has(condition)) redeemsByCondition.set(condition, []);
+          redeemsByCondition.get(condition).push(row);
+          continue;
+        }
+        if (type !== "TRADE") continue;
         const asset = token(row);
         const size = num(row.size);
         if (!asset || size <= 0) continue;
         if (!trades.has(asset)) trades.set(asset, []);
         trades.get(asset).push(row);
+        if (condition) {
+          if (!tradesByCondition.has(condition)) tradesByCondition.set(condition, []);
+          tradesByCondition.get(condition).push(row);
+        }
         if (String(row.side || "").toUpperCase() === "BUY") {
           if (!buyFills.has(asset)) buyFills.set(asset, []);
           buyFills.get(asset).push(row);
@@ -641,10 +659,24 @@
         .sort((a, b) => (b.position_age_seconds - a.position_age_seconds) || (a.fill_progress - b.fill_progress) || (b.position_value - a.position_value));
       const openAssets = new Set(openPositions.map((row) => row.asset));
       const closedPositions = [];
+      const closedAssets = new Set();
       for (const [asset, rows] of trades.entries()) {
         if (openAssets.has(asset)) continue;
         const closed = closedPosition(asset, rows, okThreshold);
-        if (closed) closedPositions.push(closed);
+        if (closed) {
+          closedPositions.push(closed);
+          closedAssets.add(asset);
+        }
+      }
+      for (const [condition, redeems] of redeemsByCondition.entries()) {
+        const rows = (tradesByCondition.get(condition) || []).filter((row) => {
+          const asset = token(row);
+          return asset && !openAssets.has(asset) && !closedAssets.has(asset);
+        });
+        for (const closed of redeemClosedPositions(condition, rows, redeems, okThreshold)) {
+          closedPositions.push(closed);
+          closedAssets.add(closed.asset);
+        }
       }
       closedPositions.sort((a, b) => b.close_timestamp - a.close_timestamp);
 
@@ -685,7 +717,7 @@
       const asset = token(row);
       const shares = num(row.size);
       if (!asset || shares <= 0) return null;
-      const currentPrice = num(row.currentPrice) || (shares > 0 ? num(row.currentValue) / shares : 0);
+      const currentPrice = num(row.currentPrice) || num(row.curPrice) || (shares > 0 ? num(row.currentValue) / shares : 0);
       const positionValue = num(row.currentValue) || shares * currentPrice;
       const avgEntry = num(row.avgPrice);
       const first = firstByTime(fills);
@@ -741,7 +773,57 @@
         realized_pnl: closedShares * (avgExit - avgEntry),
         size_ok: closedShares >= okThreshold,
         size_status: closedShares >= okThreshold ? "OK" : "Too Small",
+        close_source: "sell",
       };
+    }
+
+    function redeemClosedPositions(condition, tradeRows, redeemRows, okThreshold) {
+      const buysByAsset = new Map();
+      for (const row of tradeRows) {
+        if (String(row.side || "").toUpperCase() !== "BUY") continue;
+        const asset = token(row);
+        if (!asset || num(row.size) <= 0) continue;
+        if (!buysByAsset.has(asset)) buysByAsset.set(asset, []);
+        buysByAsset.get(asset).push(row);
+      }
+      const redeemShares = sum(redeemRows.map((row) => num(row.size)));
+      if (!buysByAsset.size || redeemShares <= 0) return [];
+      const candidates = Array.from(buysByAsset.entries()).map(([asset, buys]) => ({
+        asset,
+        buys: buys.slice().sort(byTime),
+        buyShares: sum(buys.map((row) => num(row.size))),
+      })).filter((item) => item.buyShares > 0);
+      if (!candidates.length) return [];
+      candidates.sort((a, b) => Math.abs(a.buyShares - redeemShares) - Math.abs(b.buyShares - redeemShares));
+      const candidate = candidates[0];
+      const buys = candidate.buys;
+      const first = buys[0];
+      const lastRedeem = redeemRows.slice().sort(byTime).at(-1);
+      const openTs = Number(first.timestamp || 0);
+      const closeTs = Number(lastRedeem?.timestamp || 0);
+      const closedShares = Math.min(candidate.buyShares, redeemShares);
+      const avgEntry = sum(buys.map(fillCost)) / candidate.buyShares;
+      const avgExit = 1;
+      return [{
+        asset: candidate.asset,
+        condition_id: condition,
+        market: String(first.title || lastRedeem?.title || first.slug || lastRedeem?.slug || first.eventSlug || condition),
+        slug: String(first.slug || lastRedeem?.slug || first.eventSlug || lastRedeem?.eventSlug || ""),
+        outcome: String(first.outcome || "Redeemed outcome"),
+        open_time: openTs ? formatTime(openTs) : "",
+        open_timestamp: openTs,
+        close_time: closeTs ? formatTime(closeTs) : "",
+        close_timestamp: closeTs,
+        holding_time: openTs && closeTs ? fmtDuration(closeTs - openTs) : "",
+        holding_seconds: openTs && closeTs ? closeTs - openTs : 0,
+        closed_shares: closedShares,
+        avg_entry_price: avgEntry,
+        avg_exit_price: avgExit,
+        realized_pnl: closedShares * (avgExit - avgEntry),
+        size_ok: closedShares >= okThreshold,
+        size_status: closedShares >= okThreshold ? "OK" : "Too Small",
+        close_source: "redeem",
+      }];
     }
 
     function precisionSamples(activityRows, targetShares, okThreshold) {
@@ -1020,6 +1102,7 @@
     }
 
     function token(row) { return String(row.asset || row.assetId || row.tokenId || ""); }
+    function conditionId(row) { return String(row.conditionId || row.condition_id || ""); }
     function byTime(a, b) { return Number(a.timestamp || 0) - Number(b.timestamp || 0); }
     function firstByTime(rows) { return rows && rows.length ? rows.slice().sort(byTime)[0] : null; }
     function fillPrice(row) { const price = num(row.price); return price || (num(row.size) > 0 ? num(row.usdcSize) / num(row.size) : 0); }
